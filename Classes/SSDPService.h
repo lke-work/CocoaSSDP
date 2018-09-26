@@ -54,6 +54,17 @@
  */
 @property(readonly, nonatomic) NSNumber *cacheControlTime;
 
+/** 
+ The complete set of headers
+ */
+@property(readonly, nonatomic) NSDictionary *headers;
+
+/**
+ The raw response - for debugging purpose
+ */
+@property(readonly, nonatomic) NSString *rawResponse;
+
+
 /**
  Intialize a new instance
 
@@ -63,5 +74,16 @@
  dictionary
  */
 - (id)initWithHeaders:(NSDictionary *)headers;
+
+/** 
+  Intialize a new instance
+
+ @param headers The headers returned by the SSDP search response
+ @param rawResponse The raw response - for debugging purpose
+
+ @return Returns a new `SSDPService` instance, populated from the headers
+ dictionary
+ */
+- (id)initWithHeadersAndRawResponse:(NSDictionary *)headers rawResponse:(NSString*)rawResponse;
 
 @end

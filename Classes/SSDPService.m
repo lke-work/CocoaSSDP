@@ -42,6 +42,19 @@
     return self;
 }
 
+- (id)initWithHeadersAndRawResponse:(NSDictionary *)headers rawResponse:(NSString*)rawResponse {
+    self = [super init];
+    if (self) {
+        _location = [NSURL URLWithString:[headers objectForKey:@"location"]];
+        _serviceType = [headers objectForKey:@"st"];
+        _uniqueServiceName = [headers objectForKey:@"usn"];
+        _server = [headers objectForKey:@"server"];
+        _headers = headers;
+        _rawResponse = rawResponse;
+    }
+    return self;
+}
+
 - (NSNumber *)scanCacheControlTime:(NSString *)cacheControl
 {
     NSScanner *scanner = [NSScanner scannerWithString:cacheControl];
