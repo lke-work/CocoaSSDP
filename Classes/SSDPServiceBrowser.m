@@ -215,7 +215,7 @@ typedef enum : NSUInteger {
 
 - (NSMutableDictionary *)_parseHeadersFromMessage:(NSString *)message {
     NSMutableDictionary *headers = [NSMutableDictionary dictionary];
-    NSString *pattern = @"^([a-z0-9-]+): *(.+)$";
+    NSString *pattern = @"^([a-zA-Z0-9\\._-]+): *(.+)$";
     NSRegularExpression *regex = [NSRegularExpression
                                   regularExpressionWithPattern:pattern
                                   options:NSRegularExpressionCaseInsensitive|

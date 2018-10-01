@@ -69,7 +69,7 @@
 /**
  A delegate to inform of browsing events.
  */
-@property(assign, nonatomic) id<SSDPServiceBrowserDelegate> delegate;
+@property(weak, nonatomic) id<SSDPServiceBrowserDelegate> delegate;
 
 /**
  Initialize a new browser on a specific network interface.
