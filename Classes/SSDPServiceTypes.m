@@ -21,6 +21,8 @@
 //  THE SOFTWARE.
 //
 
+#import <Foundation/NSString.h>
+
 NSString *const SSDPServiceType_All = @"ssdp:all";
 
 NSString *const SSDPServiceType_UPnP_RootDevice = @"upnp:rootdevice";
