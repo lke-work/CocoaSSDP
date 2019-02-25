@@ -20,6 +20,9 @@
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 //  THE SOFTWARE.
 //
+//
+
+#import <Foundation/NSString.h>
 
 ///-----------------------------------------------------------------------------
 /// @name General Searches
@@ -58,7 +61,7 @@ extern NSString *const SSDPServiceType_UPnP_WANConnectionDevice1;
 extern NSString *const SSDPServiceType_UPnP_WANDevice1;
 
 /**
- Search target for WAN Common Interface Config Services: 
+ Search target for WAN Common Interface Config Services:
  `urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1`
  */
 extern NSString *const SSDPServiceType_UPnP_WANCommonInterfaceConfig1;
