@@ -104,15 +104,9 @@ typedef enum : NSUInteger {
     return userAgent;
 }
 
-
-- (void)startBrowsingForServices:(NSString *)serviceType {
-    
-    if (!_socket.isConnected) {
-        [self setupSocket];
-    }
-    
-    NSString *searchHeader;
-    searchHeader = [self _prepareSearchRequestWithServiceType:serviceType];
+- (void)resendRequestForServices:(NSString *)serviceType
+{
+    NSString *searchHeader = [self _prepareSearchRequestWithServiceType:serviceType];
     NSData *d = [searchHeader dataUsingEncoding:NSUTF8StringEncoding];
 
     [_socket sendData:d
@@ -122,7 +116,26 @@ typedef enum : NSUInteger {
                   tag:11];
 }
 
-- (void)setupSocket
+- (void)startBrowsingForServices:(NSString *)serviceType {
+    
+    BOOL socketOK = YES;
+    if (!_socket.isConnected) {
+        socketOK = [self setupSocket];
+    }
+    
+    if (socketOK) {
+        NSString *searchHeader = [self _prepareSearchRequestWithServiceType:serviceType];
+        NSData *d = [searchHeader dataUsingEncoding:NSUTF8StringEncoding];
+
+        [_socket sendData:d
+                   toHost:SSDPMulticastGroupAddress
+                     port:SSDPMulticastUDPPort
+              withTimeout:-1
+                      tag:11];
+    }
+}
+
+- (BOOL)setupSocket
 {
     // First call to _socket needs to be called by self for lazy instantiation
     [self.socket setIPv6Enabled:NO];
@@ -135,18 +148,20 @@ typedef enum : NSUInteger {
 
     if(![_socket bindToAddress:sourceAddress error:&err]) {
         [self _notifyDelegateWithError:err];
-        return;
+        return NO;
     }
 
     if(![_socket joinMulticastGroup:SSDPMulticastGroupAddress error:&err]) {
         [self _notifyDelegateWithError:err];
-        return;
+        return NO;
     }
 
     if(![_socket beginReceiving:&err]) {
         [self _notifyDelegateWithError:err];
-        return;
+        return NO;
     }
+    
+    return YES;
 }
 
 - (GCDAsyncUdpSocket *)socket

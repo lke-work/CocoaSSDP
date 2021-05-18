@@ -81,6 +81,14 @@
 - (id)initWithInterface:(NSString *)networkInterface;
 
 /**
+ Resends UPnP services request on the initialized instance.
+
+ @param serviceType The UPnP service type to search for.
+
+ */
+- (void)resendRequestForServices:(NSString *)serviceType;
+
+/**
  Start browsing for UPnP services matching the browsers service type.
 
  @param serviceType The UPnP service type to search for.
