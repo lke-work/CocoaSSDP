@@ -27,6 +27,14 @@
 @class SSDPService;
 
 /**
+ Report the browser failed to start browsing for services.
+
+ @param browser The current browser instance.
+ @param address The current ip address used.
+ */
+- (void)ssdpBrowser:(SSDPServiceBrowser *)browser didStartBrowsingForServicesOnAddress:(NSString *)address;
+
+/**
  The `SSDPServiceBrowserDelegate` protocol is adopted by an object that wishes
  to be informed of devices that are found or removed during a browsers search
  cycle.
