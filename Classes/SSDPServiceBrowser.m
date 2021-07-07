@@ -32,6 +32,7 @@
 #import <net/if.h>
 #import <arpa/inet.h>
 
+#define kMaxRetriesNumber 5
 
 NSString *const SSDPMulticastGroupAddress = @"239.255.255.250";
 int const SSDPMulticastUDPPort = 1900;
@@ -39,7 +40,6 @@ int const SSDPMulticastUDPPort = 1900;
 NSString *const SSDPVersionString = @"CocoaSSDP/0.1.0";
 NSString *const SSDPResponseStatusKey = @"HTTP-Status";
 NSString *const SSDPRequestMethodKey = @"HTTP-Method";
-
 
 typedef enum : NSUInteger {
     SSDPUnknownMessage,
@@ -49,12 +49,29 @@ typedef enum : NSUInteger {
     SSDPNotifyMessage,
 } SSDPMessageType;
 
+typedef enum : NSUInteger {
+    SSDPFailed,
+    SSDPSucceeded,
+} SSDPDidFindServiceStatus;
 
-@interface SSDPServiceBrowser ()
+@interface SSDPServiceBrowser () {
+    
+    BOOL status;
+    int resends;
+
+    NSMutableDictionary *listedIps;
+    NSMutableArray *failedAddresses;
+    NSData *lastTriedAddress;
+    NSData *currentAddress;
+    NSString *currentIp;
+}
+
 @property (strong, nonatomic) GCDAsyncUdpSocket *socket;
+
 @end
 
 @interface SSDPServiceBrowser (Socket) <GCDAsyncUdpSocketDelegate>
+
 @end
 
 @implementation SSDPServiceBrowser
@@ -63,6 +80,11 @@ typedef enum : NSUInteger {
     self = [super init];
     if (self) {
         _networkInterface = [networkInterface copy];
+        
+        failedAddresses = [NSMutableArray new];
+        
+        status = SSDPFailed;
+        resends = 0;
     }
     return self;
 }
@@ -70,7 +92,6 @@ typedef enum : NSUInteger {
 - (id)init {
     return [self initWithInterface:nil];
 }
-
 
 - (NSString *)_prepareSearchRequestWithServiceType:(NSString *)serviceType {
     NSString *userAgent = [self _userAgentString];
@@ -104,16 +125,59 @@ typedef enum : NSUInteger {
     return userAgent;
 }
 
-- (void)resendRequestForServices:(NSString *)serviceType
+- (void)browseForServices:(NSString *)serviceType
 {
+    resends++;
+    
     NSString *searchHeader = [self _prepareSearchRequestWithServiceType:serviceType];
     NSData *d = [searchHeader dataUsingEncoding:NSUTF8StringEncoding];
+
+    __weak typeof(self) weakSelf = self;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            typeof(self)strongSelf = weakSelf;
+            [strongSelf.delegate ssdpBrowser:strongSelf didStartBrowsingForServicesOnAddress:strongSelf->currentIp];
+        }
+    });
 
     [_socket sendData:d
                toHost:SSDPMulticastGroupAddress
                  port:SSDPMulticastUDPPort
           withTimeout:-1
                   tag:11];
+}
+
+- (void)resendRequestForServices:(NSString *)serviceType
+{
+    if (resends < kMaxRetriesNumber || status == SSDPSucceeded) {
+        [self browseForServices:serviceType];
+    }
+    else {
+        resends = 0;
+        if (!_socket.isConnected) {
+            [self startBrowsingForServices:serviceType];
+        }
+        else if (status == SSDPFailed) {
+            [self restartBrowsingForServices:serviceType];
+        }
+    }
+}
+
+- (void)initSocket
+{
+    [self stopBrowsingForServices];
+    
+    _socket = [[GCDAsyncUdpSocket alloc]
+               initWithDelegate:self delegateQueue:dispatch_get_main_queue()];
+    
+    resends = 0;
+}
+
+- (void)restartBrowsingForServices:(NSString *)serviceType
+{
+    [self initSocket];
+    [self startBrowsingForServices:serviceType];
 }
 
 - (void)startBrowsingForServices:(NSString *)serviceType {
@@ -124,15 +188,37 @@ typedef enum : NSUInteger {
     }
     
     if (socketOK) {
-        NSString *searchHeader = [self _prepareSearchRequestWithServiceType:serviceType];
-        NSData *d = [searchHeader dataUsingEncoding:NSUTF8StringEncoding];
-
-        [_socket sendData:d
-                   toHost:SSDPMulticastGroupAddress
-                     port:SSDPMulticastUDPPort
-              withTimeout:-1
-                      tag:11];
+        [self browseForServices:serviceType];
     }
+}
+
+- (nullable NSData *)getInterfaceToBind
+{
+    lastTriedAddress = currentAddress;
+    
+    NSDictionary *availableInterfaces = [self availableNetworkInterfaces];
+    
+    for (NSString *key in [availableInterfaces allKeys]) {
+        NSData *address = [availableInterfaces objectForKey:key];
+        
+        if (![failedAddresses containsObject:address] && ![address isEqualToData:lastTriedAddress]) {
+            
+            if (currentAddress != nil) {
+                [failedAddresses addObject:currentAddress];
+            }
+            
+            NSLog(@"currentAdrress %@", (NSString *)[listedIps objectForKey:key]);
+
+            currentAddress = address;
+            currentIp = [listedIps objectForKey:key];
+            break;
+        }
+    }
+
+    if (currentAddress != lastTriedAddress) {
+        return currentAddress;
+    }
+    return nil;
 }
 
 - (BOOL)setupSocket
@@ -142,10 +228,24 @@ typedef enum : NSUInteger {
     
     NSError *err = nil;
 
-    NSDictionary *interfaces = [SSDPServiceBrowser availableNetworkInterfaces];
-    NSData *sourceAddress = _networkInterface? interfaces[_networkInterface] : nil;
-    if( !sourceAddress ) sourceAddress = [[interfaces allValues] firstObject];
+    NSData *sourceAddress = [self getInterfaceToBind];
 
+    if (!sourceAddress) {
+        NSDictionary *userInfo = @{NSLocalizedDescriptionKey : @"Socket in wait state. Restart WiFi please."};
+        err = [NSError errorWithDomain:@"SSDPServiceBrowser" code:1 userInfo:userInfo];
+        [self _notifyDelegateWithError:err];
+        return NO;
+    }
+    
+    if (lastTriedAddress && (currentAddress != lastTriedAddress)) {
+    
+        // Must reinit socket to bind with a different address.
+        [self initSocket];
+        [self.socket setIPv6Enabled:NO];
+
+        NSLog(@"Reinit socket and bind with new address", nil);
+    }
+    
     if(![_socket bindToAddress:sourceAddress error:&err]) {
         [self _notifyDelegateWithError:err];
         return NO;
@@ -166,7 +266,6 @@ typedef enum : NSUInteger {
 
 - (GCDAsyncUdpSocket *)socket
 {
-    
     if (_socket) {
         return _socket;
     }
@@ -188,7 +287,6 @@ typedef enum : NSUInteger {
     [GCDAsyncUdpSocket getHost:&host port:&port fromAddress:[_socket localAddress]];
     return host;
 }
-
 
 - (void)udpSocketDidClose:(GCDAsyncUdpSocket *)sock withError:(NSError *)error {
     if( error ) {
@@ -226,7 +324,6 @@ typedef enum : NSUInteger {
         NSLog(@"Got unknown Message: %@:%hu", host, port);
     }
 }
-
 
 - (NSMutableDictionary *)_parseHeadersFromMessage:(NSString *)message {
     NSMutableDictionary *headers = [NSMutableDictionary dictionary];
@@ -270,9 +367,16 @@ typedef enum : NSUInteger {
     return headers;
 }
 
-
 - (void)_notifyDelegateWithError:(NSError *)error
 {
+    status = SSDPFailed;
+    
+    if (currentAddress != nil) {
+        if (![failedAddresses containsObject:currentAddress]) {
+            [failedAddresses addObject:currentAddress];
+        }
+    }
+
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
             [_delegate ssdpBrowser:self didNotStartBrowsingForServices:error];
@@ -282,6 +386,8 @@ typedef enum : NSUInteger {
 
 - (void)_notifyDelegateWithFoundService:(SSDPService *)service
 {
+    status = SSDPSucceeded;
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
             [_delegate ssdpBrowser:self didFindService:service];
@@ -298,26 +404,48 @@ typedef enum : NSUInteger {
     });
 }
 
-
-+ (NSDictionary *)availableNetworkInterfaces {
-    NSMutableDictionary *addresses = [NSMutableDictionary dictionary];
+- (NSDictionary *)availableNetworkInterfaces {
+    listedIps = [NSMutableDictionary new];
+    
+    NSMutableDictionary *listedInterfaces = [NSMutableDictionary dictionary];
     struct ifaddrs *interfaces = NULL;
     struct ifaddrs *ifa = NULL;
 
     // retrieve the current interfaces - returns 0 on success
     if( getifaddrs(&interfaces) == 0 ) {
         for( ifa = interfaces; ifa != NULL; ifa = ifa->ifa_next ) {
-            if( (ifa->ifa_addr->sa_family == AF_INET) && !(ifa->ifa_flags & IFF_LOOPBACK) && !strncmp(ifa->ifa_name, "en", 2)) {
+            if( (ifa->ifa_addr->sa_family == AF_INET) && !(ifa->ifa_flags & IFF_LOOPBACK) && (ifa->ifa_flags & IFF_UP) && !strncmp(ifa->ifa_name, "en", 2)) {
                 NSData *data = [NSData dataWithBytes:ifa->ifa_addr length:sizeof(struct sockaddr_in)];
                 NSString *if_name = [NSString stringWithUTF8String:ifa->ifa_name];
-                [addresses setObject:data forKey:if_name];
+                 
+                NSString *ip;
+                const struct sockaddr_in *addr = (const struct sockaddr_in*)ifa->ifa_addr;
+                char addrBuf[ MAX(INET_ADDRSTRLEN, INET6_ADDRSTRLEN) ];
+                if(addr && (addr->sin_family == AF_INET || addr->sin_family == AF_INET6)) {
+                    NSString *type;
+                    if(addr->sin_family == AF_INET) {
+                        if(inet_ntop(AF_INET, &addr->sin_addr, addrBuf, INET_ADDRSTRLEN)) {
+                            type = @"ipv4";
+                        }
+                    } else {
+                        const struct sockaddr_in6 *addr6 =      (const struct sockaddr_in6*)ifa->ifa_addr;
+                        if(inet_ntop(AF_INET6, &addr6->sin6_addr, addrBuf, INET6_ADDRSTRLEN)) {
+                            type = @"ipv6";
+                        }
+                    }
+                    ip = [NSString stringWithUTF8String:addrBuf];
+                }
+                NSLog(@"SSDPServiceBrowser interface name %@ ip %@", if_name, ip ?: @"is nil");
+                
+                [listedIps setObject:ip forKey:if_name];
+                
+                [listedInterfaces setObject:data forKey:if_name];
             }
         }
 
         freeifaddrs(interfaces);
     }
-
-    return addresses;
+    return listedInterfaces;
 }
 
 @end
